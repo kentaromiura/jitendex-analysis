@@ -702,47 +702,17 @@ if __name__ == '__main__':
     else:
         mdd = None
 
-    fdict = open('jitindex.dict', 'rb')
-    zdict = fdict.read()
-    dict_data = zstd.ZstdCompressionDict(zdict)
-    cctx = zstd.ZstdCompressor(dict_data=dict_data)
-    if args.extract:
-        # write out glos
-        if mdx:
-            output_db = ''.join([base, os.path.extsep, 'comp', os.path.extsep, 'db'])
-            create_sqlite_database(output_db)
-            conn = sqlite3.connect(output_db)
-            for key, value in mdx.items():
-                keyUTF8 = key.decode('UTF-8')
-                if keyUTF8.startswith('@jitendex-'):
-                    sql = """INSERT into definitions (id, definition) VALUES(?,?)"""
-                    cur = conn.cursor()
-                    compressed = cctx.compress(value)
-                    cur.execute(sql, (keyUTF8.replace('@jitendex-',''),compressed))
-                    conn.commit()
-                else:
-                    sql = """INSERT into terms (term, definition) VALUES(?,?)"""
-                    cur = conn.cursor()
-                    valueUTF8 = value.decode('UTF-8')
-                    cur.execute(sql,(keyUTF8, valueUTF8.replace('@@@LINK=@jitendex-','')))
-                    conn.commit()
+    samples = []
 
-            # write out style
-            if mdx.header.get('StyleSheet'):
-                style_fname = ''.join([base, '_style', os.path.extsep, 'txt'])
-                sf = open(style_fname, 'wb')
-                sf.write(b'\r\n'.join(mdx.header['StyleSheet'].splitlines()))
-                sf.close()
-        # write out optional data files
-        if mdd:
-            datafolder = os.path.join(os.path.dirname(args.filename), args.datafolder)
-            if not os.path.exists(datafolder):
-                os.makedirs(datafolder)
-            for key, value in mdd.items():
-                fname = key.decode('utf-8').replace('\\', os.path.sep)
-                dfname = datafolder + fname
-                if not os.path.exists(os.path.dirname(dfname)):
-                    os.makedirs(os.path.dirname(dfname))
-                df = open(dfname, 'wb')
-                df.write(value)
-                df.close()
+
+    # write out glos
+    if mdx:
+        for key, value in mdx.items():
+            keyUTF8 = key.decode('UTF-8')
+            if keyUTF8.startswith('@jitendex-'):
+                samples.append(value)
+
+        dict_data = zstd.train_dictionary(112640, samples)
+        fdict = open('jitindex.dict', 'wb')
+        fdict.write(dict_data.as_bytes())
+        fdict.close()

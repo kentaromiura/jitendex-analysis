@@ -17,6 +17,11 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 
+
+#
+# todo: cleanup for now start it with:
+# ~/.local/bin/python generate_dict_audio.py -x jitendex/jitendex.mdx
+#
 from struct import pack, unpack
 from io import BytesIO
 import re
@@ -45,16 +50,10 @@ def create_sqlite_database(filename):
     try:
         conn = sqlite3.connect(filename)
         sql_statements = [
-            """CREATE TABLE IF NOT EXISTS definitions (
-                id INTEGER PRIMARY KEY,
-                definition TEXT NOT NULL
+            """CREATE TABLE IF NOT EXISTS audio (
+                id String PRIMARY KEY,
+                data BLOB NOT NULL
             );""",
-            """CREATE TABLE IF NOT EXISTS terms (
-                id INTEGER PRIMARY KEY,
-                term TEXT NOT NULL,
-                definition INTEGER NOT NULL,
-                FOREIGN KEY (definition) REFERENCES definitions (id)
-            );"""
         ]
         cursor = conn.cursor()
         for statement in sql_statements:
@@ -702,47 +701,30 @@ if __name__ == '__main__':
     else:
         mdd = None
 
-    fdict = open('jitindex.dict', 'rb')
-    zdict = fdict.read()
-    dict_data = zstd.ZstdCompressionDict(zdict)
-    cctx = zstd.ZstdCompressor(dict_data=dict_data)
-    if args.extract:
-        # write out glos
-        if mdx:
-            output_db = ''.join([base, os.path.extsep, 'comp', os.path.extsep, 'db'])
-            create_sqlite_database(output_db)
-            conn = sqlite3.connect(output_db)
-            for key, value in mdx.items():
-                keyUTF8 = key.decode('UTF-8')
-                if keyUTF8.startswith('@jitendex-'):
-                    sql = """INSERT into definitions (id, definition) VALUES(?,?)"""
-                    cur = conn.cursor()
-                    compressed = cctx.compress(value)
-                    cur.execute(sql, (keyUTF8.replace('@jitendex-',''),compressed))
-                    conn.commit()
-                else:
-                    sql = """INSERT into terms (term, definition) VALUES(?,?)"""
-                    cur = conn.cursor()
-                    valueUTF8 = value.decode('UTF-8')
-                    cur.execute(sql,(keyUTF8, valueUTF8.replace('@@@LINK=@jitendex-','')))
-                    conn.commit()
+    samples = []
 
-            # write out style
-            if mdx.header.get('StyleSheet'):
-                style_fname = ''.join([base, '_style', os.path.extsep, 'txt'])
-                sf = open(style_fname, 'wb')
-                sf.write(b'\r\n'.join(mdx.header['StyleSheet'].splitlines()))
-                sf.close()
-        # write out optional data files
-        if mdd:
-            datafolder = os.path.join(os.path.dirname(args.filename), args.datafolder)
-            if not os.path.exists(datafolder):
-                os.makedirs(datafolder)
-            for key, value in mdd.items():
-                fname = key.decode('utf-8').replace('\\', os.path.sep)
-                dfname = datafolder + fname
-                if not os.path.exists(os.path.dirname(dfname)):
-                    os.makedirs(os.path.dirname(dfname))
-                df = open(dfname, 'wb')
-                df.write(value)
-                df.close()
+
+    from os import listdir
+    from os.path import isfile, join
+    onlyfiles = [f for f in listdir('jitendex/data/kanji_alive_audio') if isfile(join('jitendex/data/kanji_alive_audio', f))]
+
+
+    for filename in onlyfiles:
+        file = open('jitendex/data/kanji_alive_audio/'+filename, 'rb')
+        samples.append(file.read())
+
+    dict_data = zstd.train_dictionary(112640, samples)
+    fdict = open('jitindex.audio.dict', 'wb')
+    fdict.write(dict_data.as_bytes())
+    fdict.close()
+    cctx = zstd.ZstdCompressor(dict_data=dict_data)
+    create_sqlite_database('jitendex.audio.db')
+    conn = sqlite3.connect('jitendex.audio.db')
+
+    for filename in onlyfiles:
+        file = open('jitendex/data/kanji_alive_audio/'+filename, 'rb')
+        sql = """INSERT into audio (id, data) VALUES(?,?)"""
+        cur = conn.cursor()
+        compressed = cctx.compress(file.read())
+        cur.execute(sql, (filename.replace('.opus',''),compressed))
+        conn.commit()
